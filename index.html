@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pauta da Sessão — Layout otimizado</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- ===== Barra superior (estilo documento) ===== -->
+  <header class="toolbar" role="toolbar" aria-label="Ferramentas da pauta">
+    <div class="toolbar__brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></svg>
+      <span class="toolbar__name">Pauta da Sessão</span>
+    </div>
+
+    <div class="toolbar__group">
+      <button class="icon-btn" id="btnImport" type="button" aria-label="Importar arquivo" data-tip="Importar arquivo (.docx / .xlsx)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg>
+      </button>
+      <span class="toolbar__sep" aria-hidden="true"></span>
+      <button class="icon-btn" id="btnPrint" type="button" aria-label="Imprimir" data-tip="Imprimir (A4)" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/></svg>
+      </button>
+      <button class="icon-btn" id="btnExport" type="button" aria-label="Exportar para Excel" data-tip="Exportar para Excel (.xlsx)" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 12h8v6H8zM8 15h8M12 12v6"/></svg>
+      </button>
+      <span class="toolbar__sep" aria-hidden="true"></span>
+      <button class="icon-btn" id="btnReset" type="button" aria-label="Limpar sessão" data-tip="Limpar sessão atual" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+      </button>
+    </div>
+
+    <div class="toolbar__status" id="saveStatus" aria-live="polite"></div>
+  </header>
+
+  <!-- ===== Indicador de etapas ===== -->
+  <nav class="stepper" aria-label="Etapas">
+    <div class="step" id="step1"><span class="step__n">1</span>Importar</div>
+    <span class="step__line" aria-hidden="true"></span>
+    <div class="step" id="step2"><span class="step__n">2</span>Preencher e imprimir</div>
+  </nav>
+
+  <main>
+    <!-- ===== ETAPA 1: upload + painel de confirmação ===== -->
+    <section id="stageUpload" class="stage stage--upload">
+      <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Selecionar arquivo da pauta">
+        <div class="dropzone__icon">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg>
+        </div>
+        <p class="dropzone__title">Arraste o arquivo da pauta aqui</p>
+        <p class="dropzone__hint">ou clique para selecionar — Word (.docx) ou Excel (.xlsx, .xls, .ods, .csv)</p>
+      </div>
+      <div class="panel" id="confirmPanel" hidden></div>
+    </section>
+
+    <!-- ===== ETAPA 2: layout otimizado ===== -->
+    <section id="stageEditor" class="stage" hidden>
+      <article class="sheet" id="sheet">
+        <h1 class="sheet__title" id="sessionTitle" contenteditable="true" spellcheck="false" title="Clique para editar o título"></h1>
+        <div id="cards"></div>
+      </article>
+    </section>
+  </main>
+
+  <input type="file" id="fileInput" accept=".docx,.xlsx,.xls,.ods,.csv" hidden>
+  <datalist id="obsSuggestions"></datalist>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
