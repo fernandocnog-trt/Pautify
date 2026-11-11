@@ -139,7 +139,7 @@ main { padding: 20px 16px 64px; }
 
 /* ---------- Etapa 2: folha A4 ---------- */
 .sheet {
-  width: 210mm; max-width: 100%; margin: 0 auto; padding: 14mm 12mm;
+  width: 297mm; max-width: 100%; margin: 0 auto; padding: 10mm 12mm;  /* A4 paisagem */
   background: #fff; color: #000; font-family: var(--doc-font);
   box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 10px 30px rgba(0,0,0,.06);
 }
@@ -151,7 +151,7 @@ main { padding: 20px 16px 64px; }
   border: 1.5px solid #222; border-radius: 12px; overflow: hidden;
   margin-bottom: 12px; break-inside: avoid; page-break-inside: avoid;
 }
-.card__top { display: grid; grid-template-columns: 1fr 1fr; }
+.card__top { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); }
 .card__meta { padding: 8px 12px; position: relative; }
 .card__meta::after { content: ""; position: absolute; right: 0; top: 10px; bottom: 10px; width: 1px; background: #888; }
 
@@ -171,10 +171,27 @@ main { padding: 20px 16px 64px; }
 .card__parties { padding: 8px 12px; }
 .bar { margin: 0; padding: 4px 8px; background: var(--bar); text-align: center; font-size: 13px; font-weight: 700; letter-spacing: .02em; }
 .card__parties .bar { margin-bottom: 4px; }
-.party { padding: 5px 0; font-size: 13px; }
+
+/* Uma linha por sustentação: [V|P] Advogado (parte) */
+.parties { list-style: none; margin: 0; padding: 0; }
+.party { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; font-size: 13px; line-height: 1.4; }
 .party + .party { border-top: 1px dotted #b5b5b5; }
-.party__role, .party__label { font-weight: 700; }
-.party__label { margin-top: 6px; }
+.party__text { min-width: 0; overflow-wrap: anywhere; }
+.party__name { font-weight: 700; }
+.party__role { font-weight: 400; }
+.mod-tag {
+  flex: none; display: inline-grid; place-items: center;
+  min-width: 1.75em; height: 1.5em; padding: 0 .4em;
+  border: 1px solid #000; border-radius: .4em; background: #000; color: #fff;
+  font-size: .92em; font-weight: 700; line-height: 1;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+.mod-tag--empty { background: #fff; color: #000; border-style: dashed; }
+
+/* Fonte reduz conforme a quantidade/extensão das linhas (definido em partyDensity) */
+.card__parties[data-density="1"] .party { font-size: 12px; padding: 3px 0; }
+.card__parties[data-density="2"] .party { font-size: 11px; padding: 2px 0; }
+.card__parties[data-density="3"] .party { font-size: 10px; padding: 1.5px 0; }
 
 .bar--full { border-top: 1.5px solid #222; }
 .card__decision { padding: 8px 12px 10px; }
@@ -187,9 +204,14 @@ main { padding: 20px 16px 64px; }
 .field:hover { border-color: #c9d1d9; }
 .field:focus { outline: none; border-color: var(--accent); background: #fff; }
 .field--desfecho { resize: none; overflow: hidden; min-height: 46px; display: block; }
-.obs-line { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 13px; }
-.obs-line b { flex: none; }
-.field--obs { height: 30px; padding: 4px 8px; }
+.obs-line { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; font-size: 13px; }
+.obs-line b { flex: none; padding-top: 6px; }
+.field--obs { flex: 1; min-width: 0; resize: none; overflow: hidden; min-height: 30px; padding: 4px 8px; display: block; }
+.obs-default {
+  flex: none; height: 30px; padding: 0 10px; border: 1px solid #e3e7eb; border-radius: 6px;
+  background: #fff; color: var(--muted); font: 12px var(--font); cursor: pointer; white-space: nowrap;
+}
+.obs-default:hover { color: var(--accent); border-color: var(--accent); }
 
 .print-text { display: none; }
 
@@ -211,14 +233,20 @@ main { padding: 20px 16px 64px; }
 }
 
 /* ---------- Impressão A4 ---------- */
-@page { size: A4 portrait; margin: 12mm; }
+@page { size: A4 landscape; margin: 10mm; }
 @media print {
   body { background: #fff; }
   .toolbar, .stepper, .stage--upload, .toast { display: none !important; }
   main { padding: 0; }
   .sheet { width: auto; max-width: none; margin: 0; padding: 0; box-shadow: none; }
-  .sheet__title { box-shadow: none !important; }
-  .card { border-color: #000; }
+  .sheet__title { box-shadow: none !important; break-after: avoid; page-break-after: avoid; }
+  /* Cada processo é um bloco indivisível: se não couber no resto da folha, vai inteiro para a próxima */
+  .card { border-color: #000; overflow: visible; break-inside: avoid; page-break-inside: avoid; }
+  .card__top, .card__decision, .party { break-inside: avoid; page-break-inside: avoid; }
+  .bar--full { break-after: avoid; page-break-after: avoid; }
+  .obs-default { display: none !important; }
+  .obs-line { align-items: baseline; }
+  .obs-line b { padding-top: 0; }
   .bar, .ordem-box { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .label-toggle { border: 0; }
   .field { display: none !important; }

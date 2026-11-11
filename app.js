@@ -1,7 +1,7 @@
 /* =========================================================
    Pauta da Sessão — lógica da página
    Etapa 1: importa .docx/.xlsx → interpreta colunas → painel de confirmação
-   Etapa 2: layout otimizado com "Desfecho, decisão e observações",
+   Etapa 2: layout otimizado com "Decisão e observações",
             salvamento automático (localStorage), impressão A4 e exportação .xlsx
    ========================================================= */
 (function () {
@@ -14,7 +14,8 @@
     xlsx: 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js',
     mammoth: 'https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js'
   };
-  const EXPORT_HEADERS = ['ORDEM', 'PAUTA', 'RELATOR', 'PROCESSO', 'ADVOGADO', 'MODALIDADE', 'PARTE', 'DESFECHO, DECISÃO E OBSERVAÇÕES', 'OBS.'];
+  const EXPORT_HEADERS = ['ORDEM', 'PAUTA', 'RELATOR', 'PROCESSO', 'ADVOGADO', 'MODALIDADE', 'PARTE', 'DECISÃO E OBSERVAÇÕES', 'OBS.'];
+  const MOD_NAMES = { V: 'Virtual', P: 'Presencial' };
   const COLUMN_NAMES = { ordem: 'Ordem', pauta: 'Pauta', relator: 'Relator', processo: 'Processo', advogado: 'Advogado', modalidade: 'Modalidade', parte: 'Parte' };
 
   /* ---------------------------------------------------------
@@ -28,7 +29,7 @@
   function headerKey(h) {
     const n = norm(h);
     if (!n) return null;
-    if (n.startsWith('DESFECHO') || n === 'DECISAO') return 'desfecho';
+    if (n.startsWith('DESFECHO') || n.startsWith('DECISAO')) return 'desfecho';
     if (n.startsWith('OBS')) return 'obs';
     if (n.startsWith('ORDEM')) return 'ordem';
     if (n.startsWith('PAUTA')) return 'pauta';
@@ -63,11 +64,61 @@
     return /^\d$/.test(s) ? '0' + s : s;
   }
 
+  /* Pareia, de cima para baixo, cada advogado com a sua parte (1 linha = 1 sustentação) */
   function pairUp(partes, advogados) {
     const n = Math.max(partes.length, advogados.length);
     const out = [];
-    for (let i = 0; i < n; i++) out.push({ parte: partes[i] || '', advogado: advogados[i] || '' });
+    for (let i = 0; i < n; i++) out.push({ parte: partes[i] || '', advogado: advogados[i] || '', modalidade: '' });
     return out;
+  }
+
+  /* "v", "Virtual" → "V" · "p", "Presencial" → "P" · outros valores são mantidos */
+  function normMod(v) {
+    const n = norm(v);
+    if (!n) return '';
+    if (n === 'V' || n.startsWith('VIRT')) return 'V';
+    if (n === 'P' || n.startsWith('PRES')) return 'P';
+    return clean(v).toUpperCase();
+  }
+
+  /* Célula de modalidade → lista na ordem vertical ("V\nV\nP" ou "V V P" → [V, V, P]) */
+  function splitMods(s) {
+    return splitLines(s)
+      .flatMap(l => (/^[vp]([\s,;\/]+[vp])+$/i.test(l) ? l.split(/[\s,;\/]+/) : [l]))
+      .map(normMod)
+      .filter(Boolean);
+  }
+
+  /* Regra da pauta: uma única marcação vale para todas as sustentações do processo;
+     havendo mais de uma, segue estritamente a ordem vertical dos advogados.
+     Retorna false quando a quantidade não fecha (para gerar aviso). */
+  function assignMods(linhas, mods) {
+    if (!linhas.length && mods.length) linhas.push({ parte: '', advogado: '', modalidade: '' });
+    linhas.forEach((l, i) => { l.modalidade = (mods.length === 1 ? mods[0] : mods[i]) || ''; });
+    return mods.length === 1 || mods.length === linhas.length;
+  }
+
+  /* 0 = fonte normal … 3 = mais compacta (muitas sustentações ou linhas longas) */
+  function partyDensity(partes) {
+    const n = partes.length;
+    const longest = Math.max(0, ...partes.map(p => (p.advogado || '').length + (p.parte || '').length));
+    if (n >= 7) return 3;
+    if (n >= 5 || (n >= 3 && longest > 70)) return 2;
+    if (n >= 3 || longest > 70) return 1;
+    return 0;
+  }
+
+  /* Converte sessões salvas no formato antigo (modalidade única por processo) */
+  function migrate(session) {
+    (session.items || []).forEach(it => {
+      it.partes = it.partes || [];
+      if ('modalidade' in it) {
+        assignMods(it.partes, splitMods(it.modalidade));
+        delete it.modalidade;
+      }
+      it.partes.forEach(p => { if (p.modalidade == null) p.modalidade = ''; });
+    });
+    return session;
   }
 
   function rowsToSession(rows, fallbackTitle) {
@@ -92,10 +143,14 @@
       const processo = oneLine(get(r, 'processo'));
       const ordem = fmtOrdem(get(r, 'ordem'));
       const pairs = pairUp(splitLines(get(r, 'parte')), splitLines(get(r, 'advogado')));
+      const mods = splitMods(get(r, 'modalidade'));
 
       // Linha de continuação (células mescladas): só partes/advogados → anexa ao processo anterior
       if (!processo && !ordem) {
-        if (pairs.length && items.length) items[items.length - 1].partes.push(...pairs);
+        if (items.length) {
+          items[items.length - 1].partes.push(...pairs);
+          items[items.length - 1]._mods.push(...mods);
+        }
         continue;
       }
 
@@ -105,8 +160,8 @@
         pauta: fmtPauta(get(r, 'pauta')),
         relator: oneLine(get(r, 'relator')),
         processo,
-        modalidade: oneLine(get(r, 'modalidade')),
         partes: pairs,
+        _mods: mods,
         desfecho: String(get(r, 'desfecho')).trim(),
         obs: oneLine(get(r, 'obs'))
       };
@@ -115,10 +170,19 @@
     }
 
     items.forEach(it => {
+      const ref = `Ordem ${it.ordem || '?'} (${it.processo})`;
+      const mods = it._mods;
+      delete it._mods;
+      const ok = assignMods(it.partes, mods);
+      if (mods.length && !ok) {
+        warnings.push(`${ref}: ${mods.length} modalidade(s) para ${it.partes.length} sustentação(ões) — atribuídas de cima para baixo; confira.`);
+      } else if (!mods.length && 'modalidade' in map && it.partes.length) {
+        warnings.push(`${ref}: modalidade não informada.`);
+      }
       const nP = it.partes.filter(p => p.parte).length;
       const nA = it.partes.filter(p => p.advogado).length;
       if (nP && nA && nP !== nA) {
-        warnings.push(`Ordem ${it.ordem || '?'} (${it.processo}): ${nP} parte(s) e ${nA} advogado(s) — pareados pela ordem das linhas.`);
+        warnings.push(`${ref}: ${nP} parte(s) e ${nA} advogado(s) — pareados pela ordem das linhas.`);
       }
     });
 
@@ -149,7 +213,7 @@
     return kept;
   }
 
-  const api = { norm, headerKey, findHeader, fmtOrdem, fmtPauta, pairUp, rowsToSession, mergePrevious };
+  const api = { norm, headerKey, findHeader, fmtOrdem, fmtPauta, pairUp, normMod, splitMods, assignMods, partyDensity, migrate, rowsToSession, mergePrevious };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof document === 'undefined') return; // execução em Node (testes)
 
@@ -252,7 +316,6 @@
     cards: $('#cards'),
     status: $('#saveStatus'),
     toast: $('#toast'),
-    datalist: $('#obsSuggestions'),
     btnImport: $('#btnImport'),
     btnPrint: $('#btnPrint'),
     btnExport: $('#btnExport'),
@@ -355,12 +418,12 @@
     const relatores = new Set(items.map(i => i.relator).filter(Boolean));
     const partes = items.reduce((n, i) => n + i.partes.length, 0);
     const mods = {};
-    items.forEach(i => { const m = i.modalidade || '—'; mods[m] = (mods[m] || 0) + 1; });
-    const modTxt = Object.entries(mods).map(([m, n]) => `${m} × ${n}`).join(' · ');
+    items.forEach(i => i.partes.forEach(p => { const m = p.modalidade || '—'; mods[m] = (mods[m] || 0) + 1; }));
+    const modTxt = Object.entries(mods).map(([m, n]) => `${MOD_NAMES[m] || m} × ${n}`).join(' · ');
 
     const chips = Object.keys(COLUMN_NAMES).map(k =>
       `<span class="chip${session.columns.includes(k) ? '' : ' chip--off'}">${COLUMN_NAMES[k]}</span>`).join('')
-      + '<span class="chip chip--new">+ Desfecho, decisão e observações</span>';
+      + '<span class="chip chip--new">+ Decisão e observações</span>';
 
     const notes = [];
     if (kept) notes.push(`<ul class="notes notes--info"><li>${kept} decisão(ões) já preenchida(s) desta sessão foram preservadas.</li></ul>`);
@@ -377,7 +440,7 @@
       <div class="stats">
         <div class="stat"><b>${items.length}</b><span>processos</span></div>
         <div class="stat"><b>${relatores.size}</b><span>relatores</span></div>
-        <div class="stat"><b>${partes}</b><span>partes / procuradores</span></div>
+        <div class="stat"><b>${partes}</b><span>sustentações</span></div>
         <div class="stat"><b style="font-size:16px;padding:3px 0">${esc(modTxt)}</b><span>modalidade</span></div>
       </div>
       <p class="panel__label">Colunas reconhecidas</p>
@@ -440,13 +503,16 @@
   }
 
   function cardHTML(it) {
-    const partes = it.partes.length ? it.partes : [{ parte: '', advogado: '' }];
-    const partesHTML = partes.map(p => `
-      <div class="party">
-        <div class="party__role">${esc((p.parte || 'Parte').toUpperCase())}:</div>
-        <div class="party__label">ADVOGADO:</div>
-        <div class="party__name">${esc(p.advogado) || '—'}</div>
-      </div>`).join('');
+    const partes = it.partes.length ? it.partes : [{ parte: '', advogado: '', modalidade: '' }];
+    // Uma linha por sustentação: [V|P] Nome do advogado (condição da parte)
+    const partesHTML = partes.map(p => {
+      const mod = p.modalidade || '';
+      return `
+            <li class="party">
+              <span class="mod-tag${mod ? '' : ' mod-tag--empty'}" title="${esc(MOD_NAMES[mod] || (mod ? 'Modalidade: ' + mod : 'Modalidade não informada'))}">${esc(mod || '?')}</span>
+              <span class="party__text"><span class="party__name">${esc(p.advogado) || '—'}</span>${p.parte ? ` <span class="party__role">(${esc(p.parte)})</span>` : ''}</span>
+            </li>`;
+    }).join('');
 
     return `
     <section class="card" data-id="${esc(it.id)}">
@@ -455,35 +521,31 @@
           <div class="ordem-box"><span class="ordem">${esc(it.ordem)}</span><span class="pauta">PAUTA: ${esc(it.pauta)}</span></div>
           <div class="meta-row"><b>PROCESSO:</b>${esc(it.processo)}</div>
           <div class="meta-row"><button type="button" class="label-toggle" data-relator="${esc(it.relator)}" title="Clique para alternar Relator / Relatora">${relatorLabel(it.relator)}:</button>${esc(it.relator)}</div>
-          <div class="meta-row"><b>MODALIDADE:</b>${esc(it.modalidade)}</div>
         </div>
-        <div class="card__parties">
+        <div class="card__parties" data-density="${partyDensity(partes)}">
           <h3 class="bar">PARTES E PROCURADORES</h3>
-          ${partesHTML}
+          <ul class="parties">${partesHTML}
+          </ul>
         </div>
       </div>
-      <h3 class="bar bar--full">DESFECHO, DECISÃO E OBSERVAÇÕES</h3>
+      <h3 class="bar bar--full">DECISÃO E OBSERVAÇÕES</h3>
       <div class="card__decision">
-        <textarea class="field field--desfecho" data-field="desfecho" rows="2" placeholder="Digite o desfecho / a decisão…" aria-label="Desfecho do processo ${esc(it.processo)}">${esc(it.desfecho)}</textarea>
+        <textarea class="field field--desfecho" data-field="desfecho" rows="2" placeholder="Digite a decisão…" aria-label="Decisão do processo ${esc(it.processo)}">${esc(it.desfecho)}</textarea>
         <div class="print-text print-text--desfecho" data-mirror="desfecho">${esc(it.desfecho)}</div>
         <div class="obs-line${it.obs ? '' : ' is-empty'}">
           <b>OBS.:</b>
-          <input class="field field--obs" data-field="obs" list="obsSuggestions" value="${esc(it.obs)}" placeholder="${esc(DEFAULT_OBS)}" aria-label="Observação do processo ${esc(it.processo)}">
+          <textarea class="field field--obs" data-field="obs" rows="1" placeholder="${esc(DEFAULT_OBS)}" aria-label="Observação do processo ${esc(it.processo)}">${esc(it.obs)}</textarea>
           <span class="print-text" data-mirror="obs">${esc(it.obs)}</span>
+          <button type="button" class="obs-default" title="Preencher com: ${esc(DEFAULT_OBS)}"${it.obs ? ' hidden' : ''}>Usar padrão</button>
         </div>
       </div>
     </section>`;
   }
 
+  /* Altura acompanha o conteúdo (quebras automáticas e Enter), tanto na decisão quanto na OBS. */
   function autosize(ta) {
     ta.style.height = 'auto';
     ta.style.height = ta.scrollHeight + 2 + 'px';
-  }
-
-  function refreshSuggestions() {
-    const set = new Set([DEFAULT_OBS]);
-    state.items.forEach(it => { if (it.obs) set.add(it.obs); });
-    els.datalist.innerHTML = Array.from(set).map(v => `<option value="${esc(v)}"></option>`).join('');
   }
 
   function renderEditor() {
@@ -491,7 +553,6 @@
     els.cards.innerHTML = state.items.map(cardHTML).join('');
     showStage('editor');
     els.cards.querySelectorAll('textarea').forEach(autosize);
-    refreshSuggestions();
     setStatus('ok', state.updatedAt ? 'Salvo às ' + hhmm(new Date(state.updatedAt)) : 'Salvo neste navegador');
   }
 
@@ -508,14 +569,25 @@
     it[field] = e.target.value;
     const card = e.target.closest('.card');
     card.querySelector(`[data-mirror="${field}"]`).textContent = e.target.value;
-    if (field === 'desfecho') autosize(e.target);
-    if (field === 'obs') e.target.closest('.obs-line').classList.toggle('is-empty', !e.target.value.trim());
+    autosize(e.target);
+    if (field === 'obs') {
+      const empty = !e.target.value.trim();
+      const line = e.target.closest('.obs-line');
+      line.classList.toggle('is-empty', empty);
+      line.querySelector('.obs-default').hidden = !empty;
+    }
     scheduleSave();
   });
 
-  els.cards.addEventListener('change', e => { if (e.target.dataset.field === 'obs') refreshSuggestions(); });
-
   els.cards.addEventListener('click', e => {
+    const fill = e.target.closest('.obs-default');
+    if (fill) {
+      const ta = fill.closest('.obs-line').querySelector('[data-field="obs"]');
+      ta.value = DEFAULT_OBS;
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      ta.focus();
+      return;
+    }
     const btn = e.target.closest('.label-toggle');
     if (!btn) return;
     const name = btn.dataset.relator;
@@ -559,6 +631,12 @@
       .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'pauta';
   }
 
+  /* Mesma convenção da pauta original: uma letra só quando todas as sustentações coincidem */
+  function modCell(it) {
+    const mods = it.partes.map(p => p.modalidade || '');
+    return new Set(mods).size <= 1 ? (mods[0] || '') : mods.join('\n');
+  }
+
   async function exportExcel() {
     if (!state) return;
     saveNow();
@@ -570,7 +648,7 @@
         aoa.push([
           it.ordem, it.pauta, it.relator, it.processo,
           it.partes.map(p => p.advogado).join('\n'),
-          it.modalidade,
+          modCell(it),
           it.partes.map(p => p.parte).join('\n'),
           it.desfecho, it.obs
         ]);
@@ -639,7 +717,7 @@
   /* ---------- Inicialização ---------- */
   const saved = loadJSON(STORAGE_KEY);
   if (saved && Array.isArray(saved.items) && saved.items.length) {
-    state = saved;
+    state = migrate(saved);
     renderEditor();
   } else {
     showStage('upload');
